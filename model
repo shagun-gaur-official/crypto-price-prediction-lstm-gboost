@@ -1,0 +1,59 @@
+# src/models.py - train simple LSTM and GradientBoostingRegressor and compare
+import numpy as np
+import pandas as pd
+from sklearn.ensemble import GradientBoostingRegressor
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import mean_squared_error
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import LSTM, Dense, Dropout
+from tensorflow.keras.callbacks import EarlyStopping
+import joblib
+
+def create_features(df):
+    df = df.copy()
+    df['return'] = df['close'].pct_change().fillna(0)
+    df['ma5'] = df['close'].rolling(5).mean().fillna(method='bfill')
+    df['ma10'] = df['close'].rolling(10).mean().fillna(method='bfill')
+    df['vol_ma5'] = df['volume'].rolling(5).mean().fillna(method='bfill')
+    df = df.dropna()
+    return df
+
+def train_gboost(df):
+    df = create_features(df)
+    X = df[['open','high','low','volume','ma5','ma10','vol_ma5']].values
+    y = df['close'].values
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+    model = GradientBoostingRegressor(n_estimators=100, max_depth=3)
+    model.fit(X_train, y_train)
+    preds = model.predict(X_test)
+    print('GBoost RMSE:', mean_squared_error(y_test, preds, squared=False))
+    joblib.dump(model, 'models/gboost.pkl')
+
+def train_lstm(df, seq_len=20, epochs=5):
+    df = create_features(df)
+    values = df[['close','ma5','ma10','volume']].values
+    # normalize
+    from sklearn.preprocessing import MinMaxScaler
+    scaler = MinMaxScaler()
+    vscaled = scaler.fit_transform(values)
+    X, y = [], []
+    for i in range(seq_len, len(vscaled)):
+        X.append(vscaled[i-seq_len:i])
+        y.append(vscaled[i,0])  # predict close
+    X = np.array(X); y = np.array(y)
+    split = int(0.8*len(X))
+    X_train, X_test = X[:split], X[split:]
+    y_train, y_test = y[:split], y[split:]
+    model = Sequential([
+        LSTM(64, input_shape=(X_train.shape[1], X_train.shape[2]), return_sequences=False),
+        Dropout(0.2),
+        Dense(1)
+    ])
+    model.compile(optimizer='adam', loss='mse')
+    es = EarlyStopping(monitor='val_loss', patience=3, restore_best_weights=True)
+    model.fit(X_train, y_train, validation_data=(X_test,y_test), epochs=epochs, batch_size=32, callbacks=[es])
+    preds = model.predict(X_test).flatten()
+    from sklearn.metrics import mean_squared_error
+    print('LSTM RMSE (scaled):', mean_squared_error(y_test, preds, squared=False))
+    model.save('models/lstm.h5')
+
