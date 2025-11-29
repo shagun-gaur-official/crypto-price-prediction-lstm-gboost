@@ -1,0 +1,19 @@
+# run_demo.py - generate data, train small models, compare
+import os
+from src.generate_data import generate_synthetic
+from src import models
+import pandas as pd
+
+os.makedirs('data', exist_ok=True)
+os.makedirs('models', exist_ok=True)
+
+df = generate_synthetic(periods=600)
+df.to_csv('data/synthetic_crypto.csv', index=False)
+print('Data saved to data/synthetic_crypto.csv')
+
+print('Training Gradient Boosting...')
+models.train_gboost(df)
+
+print('Training LSTM (this may take a few minutes)...')
+models.train_lstm(df, seq_len=20, epochs=3)
+print('Demo complete. Models saved in /models')
